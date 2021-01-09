@@ -124,7 +124,7 @@ def send_command(request: DNSQR, identify: bytes, ans_code: int, enc_data: bytes
     data = decode_msg(identify, enc_data)
     print('answer from ', identify, ' with code ', ans_code, ':\n', data)
     if input_buffer != '':
-        response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode()')
+        response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
         send_response(request, response_data)
         input_buffer = ''
     else
