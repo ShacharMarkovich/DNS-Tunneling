@@ -1,6 +1,6 @@
 """
-Shachar Markovich 211491766
-Naor Maman        207341777
+Shachar Markovich
+Naor Maman       
 """
 import binascii
 import base64
