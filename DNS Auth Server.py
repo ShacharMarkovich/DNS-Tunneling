@@ -378,7 +378,7 @@ def dns_request_filter(pkt) -> bool:
 
 def run():
     """
-    run the DNS Spoof attack
+    run the DNS Tunneling attack
     """
     listen_sock = listen_socket()
 
