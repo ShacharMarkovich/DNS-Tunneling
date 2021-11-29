@@ -22,7 +22,11 @@ import platform
 tmp_msg = b''
 TYPES = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'TXT': 16}
 DOMAIN = b".g00gle.com."
-DNS_SERVER_IP = "10.3.1.24"
+
+ip_file = open("ip.txt",'r')
+DNS_SERVER_IP = ip_file.read()
+ip_file.close()
+
 MAX_CHARS_IN_SUBDOMAIN = 63
 # `-9` for the code in base32 and `-9` for the identify number
 MAX_DOMAIN = 255 - len(DOMAIN) - 9 - 9 - 1
