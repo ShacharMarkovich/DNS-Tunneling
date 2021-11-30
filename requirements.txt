@@ -1,5 +1,3 @@
 pyDH
 pycryptodome
 scapy
-secrets
-pyOpenSSL
